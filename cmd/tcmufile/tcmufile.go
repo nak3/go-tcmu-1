@@ -26,7 +26,10 @@ func main() {
 	handler.DataSizes.VolumeSize = fi.Size()
 	d, err := tcmu.OpenTCMUDevice("/dev/tcmufile", handler)
 	if err != nil {
-		die("couldn't tcmu: %v", err)
+		fmt.Errorf("couldn't tcmu: %v", err)
+		// Need to clean/remove directory before die.
+		d.Close()
+		os.Exit(1)
 	}
 	defer d.Close()
 	fmt.Printf("go-tcmu attached to %s/%s\n", "/dev/tcmufile", fi.Name())
