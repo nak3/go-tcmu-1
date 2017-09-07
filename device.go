@@ -17,6 +17,9 @@ import (
 
 	"github.com/prometheus/common/log"
 	"github.com/sirupsen/logrus"
+
+	"github.com/mdlayher/genetlink"
+	"github.com/mdlayher/netlink"
 )
 
 const (
@@ -56,6 +59,86 @@ func (d *Device) Sizes() DataSizes {
 	return d.scsi.DataSizes
 }
 
+func handleNetlink() {
+	c, err := genetlink.Dial(nil)
+	if err != nil {
+		fmt.Printf("failed to dial: %v\n", err)
+		return
+		//                log.Fatalf("failed to dial netlink: %v", err)
+	}
+	defer c.Close()
+	family, err := c.GetFamily("TCM-USER")
+	if err != nil {
+		//TODO
+		fmt.Printf("failed to get family:%v \n", err)
+		return
+	}
+
+	var groupID uint32
+	for _, g := range family.Groups {
+		if g.Name == "config" {
+			groupID = family.Groups[0].ID
+			break
+		}
+	}
+	if groupID == 0 {
+		fmt.Printf("failed to groupID \n")
+		//TODO This must be not necessary as GetFamily already worked.
+		//	log.Fatalf("not found")
+		return
+	}
+	fmt.Printf("joining group... %#v\n", groupID)
+	c.JoinGroup(groupID)
+
+	fmt.Printf("c: %#v \n", c)
+	// Perform a request, receive replies, and validate the replies
+	//	go func(c *genetlink.Conn) {
+	for {
+		fmt.Printf("c: %v \n", c)
+		msgs, _, err := c.Receive()
+		if err != nil {
+			fmt.Printf("failed to receive: %v \n", err)
+			return
+		}
+		fmt.Printf(" %#v \n", msgs)
+		atbs, _ := netlink.UnmarshalAttributes(msgs[0].Data)
+		fmt.Printf(" %#v \n", atbs)
+		for i, _ := range atbs {
+			fmt.Printf(" %s \n", atbs[i].Data)
+		}
+		netlinkReply()
+	}
+	//	}(c)
+}
+
+func netlinkReply() {
+	c, err := genetlink.Dial(nil)
+	if err != nil {
+		log.Fatalf("failed to dial generic netlink: %v", err)
+	}
+	defer c.Close()
+	family, err := c.GetFamily("TCM-USER")
+	if err != nil {
+		//TODO
+		fmt.Printf("failed to get family:%v \n", err)
+		return
+	}
+	req := genetlink.Message{
+		Header: genetlink.Header{
+			Command: 0x1,
+			//Version: family.Version,
+			Version: 2,
+		},
+	}
+	//flags := netlink.HeaderFlagsRequest | netlink.HeaderFlagsDump
+	flags := netlink.HeaderFlagsRequest
+	ms, err := c.Send(req, family.ID, flags)
+	if err != nil {
+		log.Fatalf("failed to execute: %v", err)
+	}
+	fmt.Printf("sent: %v", ms)
+}
+
 // OpenTCMUDevice creates the virtual device based on the details in the SCSIHandler, eventually creating a device under devPath (eg, "/dev") with the file name scsi.VolumeName.
 // The returned Device represents the open device connection to the kernel, and must be closed.
 func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
@@ -66,6 +149,9 @@ func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
 		hbaDir:  fmt.Sprintf(configDirFmt, scsi.HBA),
 		toClean: make(map[string]bool),
 	}
+	go handleNetlink()
+	//	time.Sleep(5 * time.Second)
+
 	if err := d.preEnableTcmu(); err != nil {
 		return d, err
 	}
@@ -170,7 +256,7 @@ func (d *Device) createDevEntry() error {
 		}
 
 		logrus.Debugf("Waiting for %s", path)
-		time.Sleep(1 * time.Second)
+		//		time.Sleep(1 * time.Second)
 	}
 
 	if !found {
