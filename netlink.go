@@ -40,18 +40,21 @@ const (
 	TCMU_CMD_SET_FEATURES
 )
 
-func handleNetlink() {
+func enabled() []byte {
+	o := make([]byte, 1)
+	nlenc.PutUint8(o, 1)
+	return o
+}
+
+func handleNetlink() error {
 	c, err := genetlink.Dial(nil)
 	if err != nil {
-		logrus.Fatalf("failed to dial netlink: %v", err)
-		return
+		return fmt.Errorf("failed to dial netlink: %v", err)
 	}
 	defer c.Close()
 	family, err := c.GetFamily("TCM-USER")
 	if err != nil {
-		//TODO
-		fmt.Printf("failed to get family:%v \n", err)
-		return
+		return fmt.Errorf("not found TCM-USER netink. you might miss to load target_core_user kernel module")
 	}
 	var groupID uint32
 	for _, g := range family.Groups {
@@ -62,18 +65,16 @@ func handleNetlink() {
 	}
 	if groupID == 0 {
 		//TODO This must be not necessary as GetFamily already worked.
-		logrus.Fatalf("not found")
+		return fmt.Errorf("not found groupdID")
 	}
 
-	one := make([]byte, 1)
-	nlenc.PutUint8(one, 0)
 	if err := c.JoinGroup(groupID); err != nil {
 		logrus.Fatalf("failed to join group: %v", err)
 	}
 
 	a := []netlink.Attribute{{
 		Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
-		Data: one,
+		Data: enabled(),
 	}}
 	b, _ := netlink.MarshalAttributes(a)
 
@@ -93,8 +94,8 @@ func handleNetlink() {
 		logrus.Debugf("receiving: ...")
 		msgs, _, err := c.Receive()
 		if err != nil {
-			fmt.Printf("failed to receive: %v \n", err)
-			return
+			fmt.Printf("failed to receive: %v\n", err)
+			continue
 		}
 		fmt.Printf(" %#v \n", msgs)
 		atbs, _ := netlink.UnmarshalAttributes(msgs[0].Data)
@@ -118,14 +119,15 @@ func handleNetlink() {
 			//TODO
 			// somehting and status = 0
 			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_REMOVED_DEVICE_DONE)
+			return nil
 		case TCMU_CMD_RECONFIG_DEVICE:
 			//TODO
 			// somehting and status = 0
 			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_RECONFIG_DEVICE_DONE)
 		default:
 			// error
+			// return
 		}
-
 	}
 }
 
@@ -138,7 +140,7 @@ func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s uint32, d
 	attrs := []netlink.Attribute{
 		{
 			Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
-			Data: one,
+			Data: enabled(),
 		},
 		{
 			Type: TCMU_ATTR_CMD_STATUS,
