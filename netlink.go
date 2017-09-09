@@ -44,6 +44,7 @@ func handleNetlink() error {
 		return fmt.Errorf("failed to dial netlink: %v", err)
 	}
 	defer c.Close()
+
 	family, err := c.GetFamily("TCM-USER")
 	if err != nil {
 		return fmt.Errorf("not found TCM-USER netink. you might miss to load target_core_user kernel module")
@@ -59,6 +60,8 @@ func handleNetlink() error {
 		return fmt.Errorf("not found groupdID")
 	}
 
+	// TODO
+	// kernel does supports tcmu netlink v2 or later.
 	if family.Version < 2 {
 		logrus.Info("netlink communication is disabled, as kernel does not support it")
 		return nil
@@ -72,14 +75,17 @@ func handleNetlink() error {
 		Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
 		Data: enabled(),
 	}}
-	b, _ := netlink.MarshalAttributes(a)
+	attr, err := netlink.MarshalAttributes(a)
+	if err != nil {
+		return fmt.Errorf("TODO")
+	}
 
 	req := genetlink.Message{
 		Header: genetlink.Header{
 			Command: TCMU_CMD_SET_FEATURES,
 			Version: family.Version,
 		},
-		Data: b,
+		Data: attr,
 	}
 	_, err = c.Send(req, family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
@@ -94,39 +100,47 @@ func handleNetlink() error {
 			continue
 		}
 		if len(msgs) != 1 {
-			//TODO
+			logrus.Errorf("received unexpected messages: %#v\n", msgs)
+			continue
 		}
 
 		atbs, err := netlink.UnmarshalAttributes(msgs[0].Data)
 		if err != nil {
-			//TODO
+			logrus.Errorf("failed to unmarshal received message: %v\n", err)
+			continue
 		}
-		deviceID := make([]byte, 4)
 
+		deviceID := make([]byte, 4)
 		for i, _ := range atbs {
-			if atbs[i].Type == 0x8 {
+			if atbs[i].Type == TCMU_ATTR_DEVICE_ID {
 				deviceID = atbs[i].Data
 			}
 		}
 
+		var replyCmd uint8
+		var result uint32
 		switch msgs[0].Header.Command {
 		case TCMU_CMD_ADDED_DEVICE:
 			//TODO
 			// somehting and status = 0
-			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_ADDED_DEVICE_DONE)
+			result = 0
+			replyCmd = TCMU_CMD_ADDED_DEVICE_DONE
 		case TCMU_CMD_REMOVED_DEVICE:
 			//TODO
 			// somehting and status = 0
-			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_REMOVED_DEVICE_DONE)
+			result = 0
+			replyCmd = TCMU_CMD_REMOVED_DEVICE_DONE
 			return nil
 		case TCMU_CMD_RECONFIG_DEVICE:
 			//TODO
 			// somehting and status = 0
-			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_RECONFIG_DEVICE_DONE)
+			result = 0
+			replyCmd = TCMU_CMD_RECONFIG_DEVICE_DONE
 		default:
-			// error
-			// return
+			logrus.Errorf("received unexpected command %#v", msgs[0])
+			continue
 		}
+		handleNetlinkReply(c, &family, result, deviceID, replyCmd)
 	}
 }
 
@@ -162,7 +176,7 @@ func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s uint32, d
 	}
 	_, err = c.Send(req, family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
-		logrus.Fatalf("failed to send: %v", err)
+		logrus.Fatalf("failed to send request: %v", err)
 	}
 	return err
 }
