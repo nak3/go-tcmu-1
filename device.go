@@ -17,9 +17,6 @@ import (
 
 	"github.com/prometheus/common/log"
 	"github.com/sirupsen/logrus"
-
-	"github.com/mdlayher/genetlink"
-	"github.com/mdlayher/netlink"
 )
 
 const (
@@ -40,8 +37,6 @@ type Device struct {
 	cmdChan  chan *SCSICmd
 	respChan chan SCSIResponse
 	cmdTail  uint32
-
-	toClean map[string]bool
 }
 
 // WWN provides two WWNs, one for the device itself and one for the loopback
@@ -59,86 +54,6 @@ func (d *Device) Sizes() DataSizes {
 	return d.scsi.DataSizes
 }
 
-func handleNetlink() {
-	c, err := genetlink.Dial(nil)
-	if err != nil {
-		fmt.Printf("failed to dial: %v\n", err)
-		return
-		//                log.Fatalf("failed to dial netlink: %v", err)
-	}
-	defer c.Close()
-	family, err := c.GetFamily("TCM-USER")
-	if err != nil {
-		//TODO
-		fmt.Printf("failed to get family:%v \n", err)
-		return
-	}
-
-	var groupID uint32
-	for _, g := range family.Groups {
-		if g.Name == "config" {
-			groupID = family.Groups[0].ID
-			break
-		}
-	}
-	if groupID == 0 {
-		fmt.Printf("failed to groupID \n")
-		//TODO This must be not necessary as GetFamily already worked.
-		//	log.Fatalf("not found")
-		return
-	}
-	fmt.Printf("joining group... %#v\n", groupID)
-	c.JoinGroup(groupID)
-
-	fmt.Printf("c: %#v \n", c)
-	// Perform a request, receive replies, and validate the replies
-	//	go func(c *genetlink.Conn) {
-	for {
-		fmt.Printf("c: %v \n", c)
-		msgs, _, err := c.Receive()
-		if err != nil {
-			fmt.Printf("failed to receive: %v \n", err)
-			return
-		}
-		fmt.Printf(" %#v \n", msgs)
-		atbs, _ := netlink.UnmarshalAttributes(msgs[0].Data)
-		fmt.Printf(" %#v \n", atbs)
-		for i, _ := range atbs {
-			fmt.Printf(" %s \n", atbs[i].Data)
-		}
-		netlinkReply()
-	}
-	//	}(c)
-}
-
-func netlinkReply() {
-	c, err := genetlink.Dial(nil)
-	if err != nil {
-		log.Fatalf("failed to dial generic netlink: %v", err)
-	}
-	defer c.Close()
-	family, err := c.GetFamily("TCM-USER")
-	if err != nil {
-		//TODO
-		fmt.Printf("failed to get family:%v \n", err)
-		return
-	}
-	req := genetlink.Message{
-		Header: genetlink.Header{
-			Command: 0x1,
-			//Version: family.Version,
-			Version: 2,
-		},
-	}
-	//flags := netlink.HeaderFlagsRequest | netlink.HeaderFlagsDump
-	flags := netlink.HeaderFlagsRequest
-	ms, err := c.Send(req, family.ID, flags)
-	if err != nil {
-		log.Fatalf("failed to execute: %v", err)
-	}
-	fmt.Printf("sent: %v", ms)
-}
-
 // OpenTCMUDevice creates the virtual device based on the details in the SCSIHandler, eventually creating a device under devPath (eg, "/dev") with the file name scsi.VolumeName.
 // The returned Device represents the open device connection to the kernel, and must be closed.
 func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
@@ -147,16 +62,18 @@ func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
 		devPath: devPath,
 		uioFd:   -1,
 		hbaDir:  fmt.Sprintf(configDirFmt, scsi.HBA),
-		toClean: make(map[string]bool),
 	}
+	err := d.Close()
 	go handleNetlink()
-	//	time.Sleep(5 * time.Second)
 
+	if err != nil {
+		return nil, err
+	}
 	if err := d.preEnableTcmu(); err != nil {
-		return d, err
+		return nil, err
 	}
 	if err := d.start(); err != nil {
-		return d, err
+		return nil, err
 	}
 
 	return d, d.postEnableTcmu()
@@ -174,7 +91,7 @@ func (d *Device) Close() error {
 }
 
 func (d *Device) preEnableTcmu() error {
-	err := d.writeLines(path.Join(d.hbaDir, d.scsi.VolumeName, "control"), []string{
+	err := writeLines(path.Join(d.hbaDir, d.scsi.VolumeName, "control"), []string{
 		fmt.Sprintf("dev_size=%d", d.scsi.DataSizes.VolumeSize),
 		fmt.Sprintf("dev_config=%s", d.GetDevConfig()),
 		fmt.Sprintf("hw_block_size=%d", d.scsi.DataSizes.BlockSize),
@@ -184,7 +101,7 @@ func (d *Device) preEnableTcmu() error {
 		return err
 	}
 
-	return d.writeLines(path.Join(d.hbaDir, d.scsi.VolumeName, "enable"), []string{
+	return writeLines(path.Join(d.hbaDir, d.scsi.VolumeName, "enable"), []string{
 		"1",
 	})
 }
@@ -200,7 +117,7 @@ func (d *Device) getLunPath(prefix string) string {
 func (d *Device) postEnableTcmu() error {
 	prefix, nexusWnn := d.getSCSIPrefixAndWnn()
 
-	err := d.writeLines(path.Join(prefix, "nexus"), []string{
+	err := writeLines(path.Join(prefix, "nexus"), []string{
 		nexusWnn,
 	})
 	if err != nil {
@@ -211,31 +128,24 @@ func (d *Device) postEnableTcmu() error {
 	logrus.Debugf("Creating directory: %s", lunPath)
 	if err := os.MkdirAll(lunPath, 0755); err != nil && !os.IsExist(err) {
 		return err
-	} else if err == nil {
-		d.toClean[lunPath] = true
-		d.toClean[path.Join(lunPath, d.scsi.VolumeName)] = true
 	}
 
 	logrus.Debugf("Linking: %s => %s", path.Join(lunPath, d.scsi.VolumeName), path.Join(d.hbaDir, d.scsi.VolumeName))
 	if err := os.Symlink(path.Join(d.hbaDir, d.scsi.VolumeName), path.Join(lunPath, d.scsi.VolumeName)); err != nil {
 		return err
 	}
-	d.toClean[path.Join(d.hbaDir, d.scsi.VolumeName)] = true
 
 	return d.createDevEntry()
 }
 
 func (d *Device) createDevEntry() error {
-	if err := os.MkdirAll(d.devPath, 0755); err != nil && !os.IsExist(err) {
-		return err
-	}
+	os.MkdirAll(d.devPath, 0755)
 
 	dev := filepath.Join(d.devPath, d.scsi.VolumeName)
 
 	if _, err := os.Stat(dev); err == nil {
 		return fmt.Errorf("Device %s already exists, can not create", dev)
 	}
-	d.toClean[dev] = true
 
 	tgt, _ := d.getSCSIPrefixAndWnn()
 
@@ -256,7 +166,7 @@ func (d *Device) createDevEntry() error {
 		}
 
 		logrus.Debugf("Waiting for %s", path)
-		//		time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 
 	if !found {
@@ -302,14 +212,13 @@ func mknod(device string, major, minor int) error {
 	return syscall.Mknod(device, uint32(fileMode), dev)
 }
 
-func (d *Device) writeLines(target string, lines []string) error {
+func writeLines(target string, lines []string) error {
 	dir := path.Dir(target)
 	if stat, err := os.Stat(dir); os.IsNotExist(err) {
 		logrus.Debugf("Creating directory: %s", dir)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
-		d.toClean[dir] = true
 	} else if !stat.IsDir() {
 		return fmt.Errorf("%s is not a directory", dir)
 	}
@@ -431,21 +340,17 @@ func (d *Device) teardown() error {
 	}
 
 	for _, p := range pathsToRemove {
-		if k, _ := d.toClean[p]; k {
-			err := remove(p)
-			if err != nil {
-				logrus.Errorf("Failed to remove: %v", err)
-			}
+		err := remove(p)
+		if err != nil {
+			return err
 		}
 	}
 
 	// Should be cleaned up automatically, but if it isn't remove it
 	if _, err := os.Stat(dev); err == nil {
-		if k, _ := d.toClean[dev]; k {
-			err := remove(dev)
-			if err != nil {
-				return err
-			}
+		err := remove(dev)
+		if err != nil {
+			return err
 		}
 	}
 
