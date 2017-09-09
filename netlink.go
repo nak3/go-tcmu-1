@@ -99,54 +99,68 @@ func handleNetlink() {
 		fmt.Printf(" %#v \n", msgs)
 		atbs, _ := netlink.UnmarshalAttributes(msgs[0].Data)
 		fmt.Printf(" %#v \n", atbs)
+		deviceID := make([]byte, 4)
+
 		for i, _ := range atbs {
-			fmt.Printf("---data -- > %s \n", atbs[i].Data)
+			if atbs[i].Type == 0x8 {
+				deviceID = atbs[i].Data
+			}
+			//fmt.Printf("---data -- > %s \n", atbs[i].Data)
 		}
 		fmt.Printf("---data -- > %#v \n", atbs[1].Data)
 
 		switch msgs[0].Header.Command {
 		case TCMU_CMD_ADDED_DEVICE:
-			//TODO add
-
-		case TCMU_CMD_REMOVED_DEVICE:
-		case TCMU_CMD_RECONFIG_DEVICE:
-		default:
 			//TODO
+			// somehting and status = 0
+			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_ADDED_DEVICE_DONE)
+		case TCMU_CMD_REMOVED_DEVICE:
+			//TODO
+			// somehting and status = 0
+			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_REMOVED_DEVICE_DONE)
+		case TCMU_CMD_RECONFIG_DEVICE:
+			//TODO
+			// somehting and status = 0
+			handleNetlinkReply(c, &family, 0, deviceID, TCMU_CMD_RECONFIG_DEVICE_DONE)
+		default:
+			// error
 		}
 
-		b32a := make([]byte, 4)
-		nlenc.PutUint32(b32a, 0)
-
-		a = []netlink.Attribute{
-			{
-				Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
-				Data: one,
-			},
-			{
-				Type: TCMU_ATTR_CMD_STATUS,
-				Data: b32a,
-			},
-			{
-				Type: TCMU_ATTR_DEVICE_ID,
-				Data: atbs[1].Data,
-			},
-		}
-		b, _ = netlink.MarshalAttributes(a)
-
-		req = genetlink.Message{
-			Header: genetlink.Header{
-				Command: 4,
-				Version: family.Version,
-			},
-			Data: b,
-		}
-		_, err = c.Send(req, family.ID, netlink.HeaderFlagsRequest)
-		if err != nil {
-			logrus.Fatalf("failed to execute: %v", err)
-		}
 	}
 }
 
-func handleNetlinkReply() {
+func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s uint32, deviceID []byte, done_cmd uint8) error {
+	status := make([]byte, 4)
+	nlenc.PutUint32(status, s)
+	one := make([]byte, 1)
+	nlenc.PutUint8(one, 0)
 
+	attrs := []netlink.Attribute{
+		{
+			Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
+			Data: one,
+		},
+		{
+			Type: TCMU_ATTR_CMD_STATUS,
+			Data: status,
+		},
+		{
+			Type: TCMU_ATTR_DEVICE_ID,
+			Data: deviceID,
+		},
+	}
+	data, _ := netlink.MarshalAttributes(attrs)
+
+	req := genetlink.Message{
+		Header: genetlink.Header{
+			Command: done_cmd,
+			Version: family.Version,
+		},
+		Data: data,
+	}
+	_, err := c.Send(req, family.ID, netlink.HeaderFlagsRequest)
+	if err != nil {
+		logrus.Fatalf("failed to execute: %v", err)
+	}
+	return err
 }
