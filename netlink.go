@@ -125,22 +125,24 @@ func handleNetlink() error {
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_ADDED_DEVICE_DONE
+			handleNetlinkReply(c, &family, result, deviceID, replyCmd)
 		case TCMU_CMD_REMOVED_DEVICE:
 			//TODO
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_REMOVED_DEVICE_DONE
+			handleNetlinkReply(c, &family, result, deviceID, replyCmd)
 			return nil
 		case TCMU_CMD_RECONFIG_DEVICE:
 			//TODO
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_RECONFIG_DEVICE_DONE
+			handleNetlinkReply(c, &family, result, deviceID, replyCmd)
 		default:
 			logrus.Errorf("received unexpected command %#v", msgs[0])
 			continue
 		}
-		handleNetlinkReply(c, &family, result, deviceID, replyCmd)
 	}
 }
 
