@@ -37,8 +37,6 @@ type Device struct {
 	cmdChan  chan *SCSICmd
 	respChan chan SCSIResponse
 	cmdTail  uint32
-
-	netlink bool
 }
 
 // WWN provides two WWNs, one for the device itself and one for the loopback
