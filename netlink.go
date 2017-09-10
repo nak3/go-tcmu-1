@@ -3,12 +3,16 @@ package tcmu
 import (
 	"fmt"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/mdlayher/genetlink"
 	"github.com/mdlayher/netlink"
 	"github.com/mdlayher/netlink/nlenc"
+	"github.com/sirupsen/logrus"
 )
+
+type nlink struct {
+	c      *genetlink.Conn
+	family genetlink.Family
+}
 
 // tcmu_genl_attr
 // include/uapi/linux/target_core_user.h
@@ -38,16 +42,16 @@ const (
 	TCMU_CMD_SET_FEATURES
 )
 
-func handleNetlink() error {
+// setNetlink creates netlink connection and enables netlink command reply.
+func setNetlink() (*nlink, error) {
 	c, err := genetlink.Dial(nil)
 	if err != nil {
-		return fmt.Errorf("failed to dial netlink: %v", err)
+		return nil, fmt.Errorf("failed to dial netlink: %v", err)
 	}
-	defer c.Close()
 
 	family, err := c.GetFamily("TCM-USER")
 	if err != nil {
-		return fmt.Errorf("not found TCM-USER netink. you might miss to load target_core_user kernel module")
+		return nil, fmt.Errorf("not found TCM-USER netink. you might miss to load target_core_user kernel module")
 	}
 	var groupID uint32
 	for _, g := range family.Groups {
@@ -57,18 +61,18 @@ func handleNetlink() error {
 		}
 	}
 	if groupID == 0 {
-		return fmt.Errorf("not found groupdID")
+		return nil, fmt.Errorf("not found groupdID")
 	}
 
-	// TODO
-	// kernel supports tcmu netlink reply v2 or later.
+	// kernel supports tcmu netlink reply v2 or later. If not support, return nil.
 	if family.Version < 2 {
 		logrus.Info("netlink communication is disabled, as kernel does not support it")
-		return nil
+		return nil, nil
 	}
 
-	if err := c.JoinGroup(groupID); err != nil {
-		logrus.Fatalf("failed to join group: %v", err)
+	err = c.JoinGroup(groupID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join group: %v", err)
 	}
 
 	a := []netlink.Attribute{{
@@ -77,7 +81,7 @@ func handleNetlink() error {
 	}}
 	attr, err := netlink.MarshalAttributes(a)
 	if err != nil {
-		return fmt.Errorf("TODO")
+		return nil, fmt.Errorf("Failed to marshal netlink attributes: %v", err)
 	}
 
 	req := genetlink.Message{
@@ -89,16 +93,20 @@ func handleNetlink() error {
 	}
 	_, err = c.Send(req, family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
-		logrus.Fatalf("failed to enabled to netlink: %v", err)
-		return err
+		return nil, fmt.Errorf("failed to enabled netlink: %v", err)
 	}
+	return &nlink{c, family}, nil
+}
 
+// handleNetlink handles netlink command from kernel.
+func (n *nlink) handleNetlink() error {
 	for {
-		msgs, _, err := c.Receive()
+		msgs, _, err := n.c.Receive()
 		if err != nil {
 			logrus.Errorf("failed to receive netlink: %v\n", err)
 			continue
 		}
+
 		if len(msgs) != 1 {
 			logrus.Errorf("received unexpected messages: %#v\n", msgs)
 			continue
@@ -125,28 +133,32 @@ func handleNetlink() error {
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_ADDED_DEVICE_DONE
-			handleNetlinkReply(c, &family, result, deviceID, replyCmd)
+			err = n.handleNetlinkReply(result, deviceID, replyCmd)
 		case TCMU_CMD_REMOVED_DEVICE:
 			//TODO
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_REMOVED_DEVICE_DONE
-			handleNetlinkReply(c, &family, result, deviceID, replyCmd)
+			err = n.handleNetlinkReply(result, deviceID, replyCmd)
 			return nil
 		case TCMU_CMD_RECONFIG_DEVICE:
 			//TODO
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_RECONFIG_DEVICE_DONE
-			handleNetlinkReply(c, &family, result, deviceID, replyCmd)
+			err = n.handleNetlinkReply(result, deviceID, replyCmd)
 		default:
 			logrus.Errorf("received unexpected command %#v", msgs[0])
 			continue
 		}
+		if err != nil {
+
+		}
 	}
 }
 
-func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s int32, deviceID []byte, done_cmd uint8) error {
+// handleNetlinkReply replys netlink command.
+func (n *nlink) handleNetlinkReply(s int32, deviceID []byte, done_cmd uint8) error {
 	status := make([]byte, 4)
 	nlenc.PutInt32(status, s)
 
@@ -172,17 +184,18 @@ func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s int32, de
 	req := genetlink.Message{
 		Header: genetlink.Header{
 			Command: done_cmd,
-			Version: family.Version,
+			Version: n.family.Version,
 		},
 		Data: data,
 	}
-	_, err = c.Send(req, family.ID, netlink.HeaderFlagsRequest)
+	_, err = n.c.Send(req, n.family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
 		logrus.Fatalf("failed to send request: %v", err)
 	}
 	return err
 }
 
+// enabled creates a byte slice with 1.
 func enabled() []byte {
 	o := make([]byte, 1)
 	nlenc.PutUint8(o, 1)

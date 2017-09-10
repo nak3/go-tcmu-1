@@ -37,6 +37,8 @@ type Device struct {
 	cmdChan  chan *SCSICmd
 	respChan chan SCSIResponse
 	cmdTail  uint32
+
+	netlink bool
 }
 
 // WWN provides two WWNs, one for the device itself and one for the loopback
@@ -64,11 +66,18 @@ func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
 		hbaDir:  fmt.Sprintf(configDirFmt, scsi.HBA),
 	}
 	err := d.Close()
-	go handleNetlink()
-
 	if err != nil {
 		return nil, err
 	}
+
+	n, err := setNetlink()
+	if err != nil {
+		return nil, err
+	}
+	if n != nil {
+		go n.handleNetlink()
+	}
+
 	if err := d.preEnableTcmu(); err != nil {
 		return nil, err
 	}
