@@ -120,7 +120,7 @@ func (n *nlink) handleNetlink() error {
 
 		atbs, err := netlink.UnmarshalAttributes(msgs[0].Data)
 		if err != nil {
-			logrus.Errorf("failed to unmarshal received message: %v\n", err)
+			logrus.Errorf("failed to unmarshal received message %#v: %v\n", msgs[0].Data, err)
 			continue
 		}
 
@@ -135,13 +135,13 @@ func (n *nlink) handleNetlink() error {
 		var result int32
 		switch msgs[0].Header.Command {
 		case TCMU_CMD_ADDED_DEVICE:
-			//TODO
+			// TODO
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_ADDED_DEVICE_DONE
 			err = n.handleNetlinkReply(result, deviceID, replyCmd)
 		case TCMU_CMD_REMOVED_DEVICE:
-			//TODO
+			// TODO
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_REMOVED_DEVICE_DONE
@@ -154,7 +154,7 @@ func (n *nlink) handleNetlink() error {
 			replyCmd = TCMU_CMD_RECONFIG_DEVICE_DONE
 			err = n.handleNetlinkReply(result, deviceID, replyCmd)
 		default:
-			logrus.Errorf("received unexpected command %#v", msgs[0])
+			logrus.Errorf("received unexpected command %#v\n", msgs[0])
 			continue
 		}
 		if err != nil {
@@ -184,7 +184,7 @@ func (n *nlink) handleNetlinkReply(s int32, deviceID []byte, done_cmd uint8) err
 	}
 	data, err := netlink.MarshalAttributes(attrs)
 	if err != nil {
-		logrus.Errorf("failed to marshal attributes: %v", err)
+		logrus.Errorf("failed to marshal attributes %#v: %v\n", attrs, err)
 	}
 
 	req := genetlink.Message{
@@ -196,7 +196,7 @@ func (n *nlink) handleNetlinkReply(s int32, deviceID []byte, done_cmd uint8) err
 	}
 	_, err = n.c.Send(req, n.family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
-		logrus.Fatalf("failed to send request: %v", err)
+		logrus.Fatalf("failed to send request: %v\n", err)
 	}
 	return err
 }
