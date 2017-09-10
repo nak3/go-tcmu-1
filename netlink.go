@@ -61,7 +61,7 @@ func handleNetlink() error {
 	}
 
 	// TODO
-	// kernel does supports tcmu netlink v2 or later.
+	// kernel supports tcmu netlink reply v2 or later.
 	if family.Version < 2 {
 		logrus.Info("netlink communication is disabled, as kernel does not support it")
 		return nil
@@ -118,7 +118,7 @@ func handleNetlink() error {
 		}
 
 		var replyCmd uint8
-		var result uint32
+		var result int32
 		switch msgs[0].Header.Command {
 		case TCMU_CMD_ADDED_DEVICE:
 			//TODO
@@ -146,9 +146,9 @@ func handleNetlink() error {
 	}
 }
 
-func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s uint32, deviceID []byte, done_cmd uint8) error {
+func handleNetlinkReply(c *genetlink.Conn, family *genetlink.Family, s int32, deviceID []byte, done_cmd uint8) error {
 	status := make([]byte, 4)
-	nlenc.PutUint32(status, s)
+	nlenc.PutInt32(status, s)
 
 	attrs := []netlink.Attribute{
 		{
