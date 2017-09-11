@@ -114,7 +114,7 @@ func (n *nlink) handleNetlink() error {
 		}
 
 		if len(msgs) != 1 {
-			logrus.Errorf("received unexpected messages: %#v\n", msgs)
+			logrus.Errorf("received unexpected message size %d: %#v\n", len(msgs), msgs)
 			continue
 		}
 
