@@ -12,15 +12,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var (
+	netlink_unsupported = errors.New("netlink is not supported")
+)
+
 type nlink struct {
 	c      *genetlink.Conn
 	family genetlink.Family
 	doneCh chan interface{}
 }
-
-var (
-	netlink_unsupported = errors.New("netlink is not supported")
-)
 
 // tcmu_genl_attr
 // include/uapi/linux/target_core_user.h
@@ -60,8 +60,7 @@ func TempNewNetlink() (*nlink, error) {
 	f := genetlink.Family{
 		Name:    "config",
 		Version: 2,
-		//ID:      10,
-		Groups: []genetlink.MulticastGroup{{ID: groupID}},
+		Groups:  []genetlink.MulticastGroup{{ID: groupID}},
 	}
 	c := genltest.Dial(func(creq genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
 		// Turn the request back around to the client.
