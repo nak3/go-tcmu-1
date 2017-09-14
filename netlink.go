@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mdlayher/genetlink/genltest"
+
 	"github.com/mdlayher/genetlink"
 	"github.com/mdlayher/netlink"
 	"github.com/mdlayher/netlink/nlenc"
@@ -52,6 +54,21 @@ const (
 )
 
 // NewNetlink returns nlink struct after join the netlink.
+func TempNewNetlink() (*nlink, error) {
+	groupID := uint32(1000)
+	f := genetlink.Family{
+		Name:    "config",
+		Version: 2,
+		Groups:  []genetlink.MulticastGroup{{ID: groupID}},
+	}
+	c := genltest.Dial(func(creq genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
+		// Turn the request back around to the client.
+		return []genetlink.Message{creq}, nil
+	})
+	return &nlink{c: c, family: f, doneCh: make(chan interface{})}, nil
+}
+
+// NewNetlink returns nlink struct after join the netlink.
 func NewNetlink() (*nlink, error) {
 	c, err := genetlink.Dial(nil)
 	if err != nil {
@@ -88,40 +105,6 @@ func NewNetlink() (*nlink, error) {
 
 // setNetlink creates netlink connection and enables netlink command reply.
 func setNetlink() (*nlink, error) {
-	/*
-		logrus.Errorf("enabling... netlink reply feature")
-		c, err := genetlink.Dial(nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to dial netlink: %v", err)
-		}
-
-		n := &nlink{c: c}
-		n.family, err = c.GetFamily("TCM-USER")
-		if err != nil {
-			return n, fmt.Errorf("not found TCM-USER netink. you might miss to load target_core_user kernel module")
-		}
-		var groupID uint32
-		for _, g := range n.family.Groups {
-			if g.Name == "config" {
-				groupID = n.family.Groups[0].ID
-				break
-			}
-		}
-		if groupID == 0 {
-			return n, fmt.Errorf("not found groupdID")
-		}
-
-		// kernel supports tcmu netlink reply v2 or later.
-		if n.family.Version < 2 {
-			logrus.Info("netlink communication is disabled, as kernel does not support it")
-			return n, nil
-		}
-
-		err = c.JoinGroup(groupID)
-		if err != nil {
-			return n, fmt.Errorf("failed to join group: %v", err)
-		}
-	*/
 	// TODO
 	n, _ := NewNetlink()
 
@@ -216,7 +199,7 @@ func (n *nlink) handleNetlink() error {
 	}
 }
 
-// handleNetlinkReply replys netlink command.
+// handleNetlinkReply replys netlink command to kernel.
 func (n *nlink) handleNetlinkReply(s int32, deviceID []byte, done_cmd uint8) error {
 	status := make([]byte, 4)
 	nlenc.PutInt32(status, s)
