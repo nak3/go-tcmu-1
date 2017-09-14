@@ -45,10 +45,14 @@ const (
 	TCMU_CMD_REMOVED_DEVICE_DONE
 	TCMU_CMD_RECONFIG_DEVICE_DONE
 	TCMU_CMD_SET_FEATURES
+
+	TCMU_CMD_FOR_TEST
+	TCMU_CMD_FOR_TEST_DONE
 )
 
 // setNetlink creates netlink connection and enables netlink command reply.
 func setNetlink() (*nlink, error) {
+	logrus.Errorf("enabling... netlink reply feature")
 	c, err := genetlink.Dial(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial netlink: %v", err)
@@ -101,6 +105,7 @@ func setNetlink() (*nlink, error) {
 	if err != nil {
 		return n, fmt.Errorf("failed to enabled netlink: %v", err)
 	}
+	logrus.Errorf("enabled netlink reply feature")
 	return n, nil
 }
 
@@ -112,7 +117,7 @@ func (n *nlink) handleNetlink() error {
 			logrus.Errorf("failed to receive netlink: %v\n", err)
 			continue
 		}
-
+		fmt.Printf("\n %v \n", msgs)
 		if len(msgs) != 1 {
 			logrus.Errorf("received unexpected message size %d: %#v\n", len(msgs), msgs)
 			continue
@@ -133,6 +138,7 @@ func (n *nlink) handleNetlink() error {
 
 		var replyCmd uint8
 		var result int32
+		fmt.Printf("\n %v \n", "TODO")
 		switch msgs[0].Header.Command {
 		case TCMU_CMD_ADDED_DEVICE:
 			// TODO
@@ -145,7 +151,9 @@ func (n *nlink) handleNetlink() error {
 			// somehting and status = 0
 			result = 0
 			replyCmd = TCMU_CMD_REMOVED_DEVICE_DONE
+			logrus.Errorf("sending reoved device")
 			err = n.handleNetlinkReply(result, deviceID, replyCmd)
+			logrus.Errorf("sending reoved device done")
 			return nil
 		case TCMU_CMD_RECONFIG_DEVICE:
 			//TODO
@@ -153,6 +161,11 @@ func (n *nlink) handleNetlink() error {
 			result = 0
 			replyCmd = TCMU_CMD_RECONFIG_DEVICE_DONE
 			err = n.handleNetlinkReply(result, deviceID, replyCmd)
+		case TCMU_CMD_FOR_TEST:
+			result = 0
+			replyCmd = TCMU_CMD_FOR_TEST_DONE
+			//			err = n.handleNetlinkReply(result, deviceID, replyCmd)
+			return nil
 		default:
 			logrus.Errorf("received unexpected command %#v\n", msgs[0])
 			continue

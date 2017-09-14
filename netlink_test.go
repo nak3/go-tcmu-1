@@ -4,6 +4,7 @@ import (
 	//	"errors"
 	"encoding"
 	"fmt"
+	//	"io"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/mdlayher/genetlink"
 	"github.com/mdlayher/genetlink/genltest"
 	"github.com/mdlayher/netlink"
+	"github.com/mdlayher/netlink/nlenc"
 	"github.com/mdlayher/netlink/nltest"
 )
 
@@ -19,34 +21,62 @@ func TestHandleNetlink(t *testing.T) {
 		length = 24
 		flags  = netlink.HeaderFlagsRequest
 	)
+	groupID := uint32(1000)
 	f := genetlink.Family{
-		ID:      1,
+		ID:      1000, // ID could be random
 		Name:    "config",
 		Version: 2,
+		Groups:  []genetlink.MulticastGroup{{ID: groupID}},
 	}
+	c := genltest.Dial(func(creq genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
+		// Turn the request back around to the client.
+		return []genetlink.Message{creq}, nil
+	})
+	defer c.Close()
+	// c := genltest.Dial(func(_ genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
+	// 	return nil, io.EOF
+	// })
+	// defer c.Close()
+
+	n := &nlink{c, f}
+
 	// 1. create connection (Dial)
 	// 2. run handleNetlink()
 	// 3. send a test data
 
 	// 1. create connection (Dial)
 
+	minor := make([]byte, 4)
+	nlenc.PutUint32(minor, 1)
+
+	devID := make([]byte, 4)
+	nlenc.PutUint32(devID, 1)
+
 	attrs := []netlink.Attribute{
 		{
+			Type: TCMU_ATTR_DEVICE,
+			Data: []byte(nlenc.Bytes("foo/bar")),
+		},
+
+		{
+			Type: TCMU_ATTR_MINOR,
+			Data: minor,
+		},
+		{
 			Type: TCMU_ATTR_DEVICE_ID,
-			Data: []byte("foo/bar"),
+			Data: devID,
 		},
 	}
+
 	data, err := netlink.MarshalAttributes(attrs)
 	if err != nil {
 		//		logrus.Errorf("failed to marshal attributes %#v: %v\n", attrs, err)
 	}
 	req := genetlink.Message{
 		Header: genetlink.Header{
-			Command: TCMU_CMD_ADDED_DEVICE,
-			//	Command: TCMU_CMD_REMOVED_DEVICE,
+			Command: TCMU_CMD_FOR_TEST,
 			Version: 2,
 		},
-		// TODO: Device ID
 		Data: data,
 	}
 
@@ -60,22 +90,12 @@ func TestHandleNetlink(t *testing.T) {
 		Data: mustMarshal(req),
 	}
 
-	c := genltest.Dial(func(_ genetlink.Message, nreq netlink.Message) ([]genetlink.Message, error) {
-		if diff := diffNetlinkMessages(want, nreq); diff != "" {
-			//			t.Fatalf("unexpected sent netlink message (-want +got):\n%s", diff)
-		}
-		return nil, nil
-	})
-	c, _ = genetlink.Dial(nil)
-
-	n := &nlink{c, f}
-
 	// 2. run handleNetlink()
 	go func() {
 		if err := n.handleNetlink(); err != nil {
 			t.Fatalf("failed to receive: %v", err)
 		} else {
-			t.Fatalf("done receive: %v", err)
+			t.Fatalf("ok")
 		}
 	}()
 
@@ -84,17 +104,14 @@ func TestHandleNetlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to send: %v", err)
 	}
-
-	fmt.Println(nlreq)
-
-	if diff := diffNetlinkMessages(want, nlreq); diff != "" {
-		//		t.Fatalf("unexpected returned netlink message (-want +got):\n%s", diff)
-	}
-	time.Sleep(1)
+	// TODO wait
+	time.Sleep(1000000)
 }
 
-func TestHandleNetlink(t *testing.T) {
+func TestHandleReplyNetlink(t *testing.T) {
+
 }
+
 func mustMarshal(m encoding.BinaryMarshaler) []byte {
 	b, err := m.MarshalBinary()
 	if err != nil {
