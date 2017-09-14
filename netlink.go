@@ -13,6 +13,7 @@ import (
 type nlink struct {
 	c      *genetlink.Conn
 	family genetlink.Family
+	doneCh chan interface{}
 }
 
 var (
@@ -50,14 +51,12 @@ const (
 	TCMU_CMD_FOR_TEST_DONE
 )
 
-// setNetlink creates netlink connection and enables netlink command reply.
-func setNetlink() (*nlink, error) {
-	logrus.Errorf("enabling... netlink reply feature")
+// NewNetlink returns nlink struct after join the netlink.
+func NewNetlink() (*nlink, error) {
 	c, err := genetlink.Dial(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial netlink: %v", err)
 	}
-
 	n := &nlink{c: c}
 	n.family, err = c.GetFamily("TCM-USER")
 	if err != nil {
@@ -84,6 +83,47 @@ func setNetlink() (*nlink, error) {
 	if err != nil {
 		return n, fmt.Errorf("failed to join group: %v", err)
 	}
+	return n, nil
+}
+
+// setNetlink creates netlink connection and enables netlink command reply.
+func setNetlink() (*nlink, error) {
+	/*
+		logrus.Errorf("enabling... netlink reply feature")
+		c, err := genetlink.Dial(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial netlink: %v", err)
+		}
+
+		n := &nlink{c: c}
+		n.family, err = c.GetFamily("TCM-USER")
+		if err != nil {
+			return n, fmt.Errorf("not found TCM-USER netink. you might miss to load target_core_user kernel module")
+		}
+		var groupID uint32
+		for _, g := range n.family.Groups {
+			if g.Name == "config" {
+				groupID = n.family.Groups[0].ID
+				break
+			}
+		}
+		if groupID == 0 {
+			return n, fmt.Errorf("not found groupdID")
+		}
+
+		// kernel supports tcmu netlink reply v2 or later.
+		if n.family.Version < 2 {
+			logrus.Info("netlink communication is disabled, as kernel does not support it")
+			return n, nil
+		}
+
+		err = c.JoinGroup(groupID)
+		if err != nil {
+			return n, fmt.Errorf("failed to join group: %v", err)
+		}
+	*/
+	// TODO
+	n, _ := NewNetlink()
 
 	a := []netlink.Attribute{{
 		Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
@@ -101,7 +141,7 @@ func setNetlink() (*nlink, error) {
 		},
 		Data: attr,
 	}
-	_, err = c.Send(req, n.family.ID, netlink.HeaderFlagsRequest)
+	_, err = n.c.Send(req, n.family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
 		return n, fmt.Errorf("failed to enabled netlink: %v", err)
 	}

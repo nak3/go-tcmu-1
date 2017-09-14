@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/mdlayher/genetlink"
-	"github.com/mdlayher/genetlink/genltest"
+	//"github.com/mdlayher/genetlink/genltest"
 	"github.com/mdlayher/netlink"
 	"github.com/mdlayher/netlink/nlenc"
-	"github.com/mdlayher/netlink/nltest"
+	//	"github.com/mdlayher/netlink/nltest"
 )
 
 func TestHandleNetlink(t *testing.T) {
@@ -21,24 +21,27 @@ func TestHandleNetlink(t *testing.T) {
 		length = 24
 		flags  = netlink.HeaderFlagsRequest
 	)
-	groupID := uint32(1000)
-	f := genetlink.Family{
-		ID:      1000, // ID could be random
-		Name:    "config",
-		Version: 2,
-		Groups:  []genetlink.MulticastGroup{{ID: groupID}},
-	}
-	c := genltest.Dial(func(creq genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
-		// Turn the request back around to the client.
-		return []genetlink.Message{creq}, nil
-	})
-	defer c.Close()
-	// c := genltest.Dial(func(_ genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
-	// 	return nil, io.EOF
-	// })
-	// defer c.Close()
+	/*
+		groupID := uint32(1000)
+		f := genetlink.Family{
+			ID:      1000, // ID could be random
+			Name:    "config",
+			Version: 2,
+			Groups:  []genetlink.MulticastGroup{{ID: groupID}},
+		}
+		c := genltest.Dial(func(creq genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
+			// Turn the request back around to the client.
+			return []genetlink.Message{creq}, nil
+		})
+		defer c.Close()
+		// c := genltest.Dial(func(_ genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
+		// 	return nil, io.EOF
+		// })
+		// defer c.Close()
+	*/
+	n, _ := NewNetlink()
 
-	n := &nlink{c, f}
+	//	n := &nlink{c, f}
 
 	// 1. create connection (Dial)
 	// 2. run handleNetlink()
@@ -80,15 +83,17 @@ func TestHandleNetlink(t *testing.T) {
 		Data: data,
 	}
 
-	want := netlink.Message{
-		Header: netlink.Header{
-			Length: length,
-			//			Type:   f.ID,
-			Flags: flags,
-			PID:   nltest.PID,
-		},
-		Data: mustMarshal(req),
-	}
+	/*
+		want := netlink.Message{
+			Header: netlink.Header{
+				Length: length,
+				//			Type:   f.ID,
+				Flags: flags,
+				PID:   nltest.PID,
+			},
+			Data: mustMarshal(req),
+		}
+	*/
 
 	// 2. run handleNetlink()
 	go func() {
@@ -100,9 +105,9 @@ func TestHandleNetlink(t *testing.T) {
 	}()
 
 	// 3. send a test data (emulate kernel's netlink message.)
-	nlreq, err := n.c.Send(req, f.ID, flags)
+	nlreq, err := n.c.Send(req, n.family.ID, flags)
 	if err != nil {
-		t.Fatalf("failed to send: %v", err)
+		t.Fatalf("failed to send: %v, %v", err, nlreq)
 	}
 	// TODO wait
 	time.Sleep(1000000)
