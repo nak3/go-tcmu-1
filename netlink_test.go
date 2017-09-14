@@ -1,22 +1,65 @@
 package tcmu
 
 import (
-	//	"errors"
 	"encoding"
 	"fmt"
-	//	"io"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/mdlayher/genetlink"
-	//"github.com/mdlayher/genetlink/genltest"
 	"github.com/mdlayher/netlink"
 	"github.com/mdlayher/netlink/nlenc"
 	"github.com/mdlayher/netlink/nltest"
 )
 
+func TestSetNetlink(t *testing.T) {
+	t.Parallel()
+	n, _ := TempNewNetlink()
+
+	data, err := netlink.MarshalAttributes([]netlink.Attribute{
+		{
+			Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
+			Data: enabled(),
+		}},
+	)
+	if err != nil {
+		t.Fatalf("Failed to marshal data: %v", err)
+	}
+	want := []genetlink.Message{{
+		Header: genetlink.Header{
+			Command: TCMU_CMD_SET_FEATURES,
+			Version: n.family.Version,
+		},
+		Data: data,
+	}}
+	received := false
+	go func() {
+		if msgs, _, err := n.c.Receive(); err != nil {
+			t.Fatalf("Failed to Receive: %v", err)
+		} else {
+			received = true
+			if diff := cmp.Diff(want, msgs); diff != "" {
+				t.Fatalf("unexpected replies (-want +got):\n%s", diff)
+			}
+		}
+	}()
+
+	if err := n.setNetlink(); err != nil {
+		t.Fatalf("Failed set netlink feature: %v", err)
+	}
+
+	// Wait 1 sec for receiving netlink.
+	time.Sleep(1000 * time.Millisecond)
+
+	if !received {
+		t.Fatalf("expected netlink received data, but not received")
+	}
+
+}
+
 func TestHandleNetlink(t *testing.T) {
+	t.Parallel()
 	const (
 		length = 0x30
 		flags  = netlink.HeaderFlagsRequest
@@ -29,7 +72,6 @@ func TestHandleNetlink(t *testing.T) {
 			t.Fatalf("Failed to handleNetlink: %v", err)
 		} else {
 			received = true
-			n.doneCh <- struct{}{}
 		}
 	}()
 
@@ -58,6 +100,7 @@ func TestHandleNetlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal data: %v", err)
 	}
+
 	req := genetlink.Message{
 		Header: genetlink.Header{
 			Command: TCMU_CMD_FOR_TEST,
@@ -75,13 +118,6 @@ func TestHandleNetlink(t *testing.T) {
 		Data: mustMarshal(req),
 	}
 
-	go func() {
-		select {
-		case <-n.doneCh:
-			return
-		}
-	}()
-
 	nlreq, err := n.c.Send(req, n.family.ID, flags)
 	if err != nil {
 		t.Fatalf("failed to send: %v", err)
@@ -91,33 +127,26 @@ func TestHandleNetlink(t *testing.T) {
 		t.Fatalf("unexpected returned netlink message (-want +got):\n%s", diff)
 	}
 
-	time.Sleep(3000 * time.Millisecond)
+	// Wait 1 sec for receiving netlink.
+	time.Sleep(1000 * time.Millisecond)
+
 	if !received {
 		t.Fatalf("expected netlink received data, but not received")
 	}
 }
 
 func TestHandleReplyNetlink(t *testing.T) {
-	const (
-		length = 0x30
-		flags  = netlink.HeaderFlagsRequest
-	)
+	t.Parallel()
 	n, _ := TempNewNetlink()
 
-	/*
-		want := netlink.Message{
-			Header: netlink.Header{
-				Length: length,
-				Flags:  flags,
-				PID:    nltest.PID,
-			},
-			//	Data: mustMarshal(req),
-		}
-	*/
+	var ok int32 = 0
+
 	devID := make([]byte, 4)
 	nlenc.PutUint32(devID, 1)
+
 	status := make([]byte, 4)
-	nlenc.PutInt32(status, 0)
+	nlenc.PutInt32(status, ok)
+
 	attrs := []netlink.Attribute{
 		{
 			Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
@@ -149,22 +178,23 @@ func TestHandleReplyNetlink(t *testing.T) {
 	received := false
 	go func() {
 		if msgs, _, err := n.c.Receive(); err != nil {
-			t.Fatalf("Failed to handleNetlink: %v", err)
+			t.Fatalf("Failed to Receive: %v", err)
 		} else {
 			received = true
-			if len(msgs) != 0 {
-
-			}
 			if diff := cmp.Diff(want, msgs); diff != "" {
 				t.Fatalf("unexpected replies (-want +got):\n%s", diff)
 			}
-			n.doneCh <- struct{}{}
 		}
 	}()
 
-	n.handleNetlinkReply(0, devID, TCMU_CMD_FOR_TEST_DONE)
+	err = n.handleNetlinkReply(ok, devID, TCMU_CMD_FOR_TEST_DONE)
+	if err != nil {
+		t.Fatalf("Failed to handleNetlinkReply: %v", err)
+	}
 
-	time.Sleep(3000 * time.Millisecond)
+	// Wait 1 sec for receiving netlink.
+	time.Sleep(1000 * time.Millisecond)
+
 	if !received {
 		t.Fatalf("expected netlink received data, but not received")
 	}

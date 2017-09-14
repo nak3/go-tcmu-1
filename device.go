@@ -68,7 +68,11 @@ func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
 		return nil, err
 	}
 
-	n, err := setNetlink()
+	n, err := NewNetlink()
+	if err != nil {
+		// TODO
+	}
+	err = n.setNetlink()
 	if err == nil {
 		go n.handleNetlink()
 	} else {

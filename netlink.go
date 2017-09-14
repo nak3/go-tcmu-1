@@ -49,17 +49,19 @@ const (
 	TCMU_CMD_RECONFIG_DEVICE_DONE
 	TCMU_CMD_SET_FEATURES
 
+	// For test
 	TCMU_CMD_FOR_TEST
 	TCMU_CMD_FOR_TEST_DONE
 )
 
-// NewNetlink returns nlink struct after join the netlink.
+// TempNewNetlink returns netlink with dummy connection. This function is used for only test.
 func TempNewNetlink() (*nlink, error) {
 	groupID := uint32(1000)
 	f := genetlink.Family{
 		Name:    "config",
 		Version: 2,
-		Groups:  []genetlink.MulticastGroup{{ID: groupID}},
+		//ID:      10,
+		Groups: []genetlink.MulticastGroup{{ID: groupID}},
 	}
 	c := genltest.Dial(func(creq genetlink.Message, _ netlink.Message) ([]genetlink.Message, error) {
 		// Turn the request back around to the client.
@@ -90,7 +92,7 @@ func NewNetlink() (*nlink, error) {
 		return n, fmt.Errorf("not found groupdID")
 	}
 
-	// kernel supports tcmu netlink reply v2 or later.
+	// tcmu netlink reply is supported only v2 or later. TODO
 	if n.family.Version < 2 {
 		logrus.Info("netlink communication is disabled, as kernel does not support it")
 		return n, nil
@@ -104,17 +106,15 @@ func NewNetlink() (*nlink, error) {
 }
 
 // setNetlink creates netlink connection and enables netlink command reply.
-func setNetlink() (*nlink, error) {
-	// TODO
-	n, _ := NewNetlink()
-
-	a := []netlink.Attribute{{
-		Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
-		Data: enabled(),
-	}}
-	attr, err := netlink.MarshalAttributes(a)
+func (n *nlink) setNetlink() error {
+	data, err := netlink.MarshalAttributes(
+		[]netlink.Attribute{{
+			Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
+			Data: enabled(),
+		}},
+	)
 	if err != nil {
-		return n, fmt.Errorf("Failed to marshal netlink attributes: %v", err)
+		return err
 	}
 
 	req := genetlink.Message{
@@ -122,14 +122,14 @@ func setNetlink() (*nlink, error) {
 			Command: TCMU_CMD_SET_FEATURES,
 			Version: n.family.Version,
 		},
-		Data: attr,
+		Data: data,
 	}
 	_, err = n.c.Send(req, n.family.ID, netlink.HeaderFlagsRequest)
 	if err != nil {
-		return n, fmt.Errorf("failed to enabled netlink: %v", err)
+		return err
 	}
-	logrus.Errorf("enabled netlink reply feature")
-	return n, nil
+	logrus.Infof("enabled netlink reply feature")
+	return nil
 }
 
 // handleNetlink handles netlink command from kernel.
@@ -140,7 +140,6 @@ func (n *nlink) handleNetlink() error {
 			logrus.Errorf("failed to receive netlink: %v\n", err)
 			continue
 		}
-		fmt.Printf("\n %v \n", msgs)
 		if len(msgs) != 1 {
 			logrus.Errorf("received unexpected message size %d: %#v\n", len(msgs), msgs)
 			continue
@@ -161,7 +160,6 @@ func (n *nlink) handleNetlink() error {
 
 		var replyCmd uint8
 		var result int32
-		fmt.Printf("\n %v \n", "TODO")
 		switch msgs[0].Header.Command {
 		case TCMU_CMD_ADDED_DEVICE:
 			// TODO
