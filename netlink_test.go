@@ -61,7 +61,7 @@ func TestHandleNetlink(t *testing.T) {
 	req := genetlink.Message{
 		Header: genetlink.Header{
 			Command: TCMU_CMD_FOR_TEST,
-			Version: 2,
+			Version: n.family.Version,
 		},
 		Data: data,
 	}
@@ -84,7 +84,7 @@ func TestHandleNetlink(t *testing.T) {
 
 	nlreq, err := n.c.Send(req, n.family.ID, flags)
 	if err != nil {
-		t.Fatalf("failed to send: %v, %v", err, nlreq)
+		t.Fatalf("failed to send: %v", err)
 	}
 
 	if diff := diffNetlinkMessages(want, nlreq); diff != "" {
@@ -98,7 +98,76 @@ func TestHandleNetlink(t *testing.T) {
 }
 
 func TestHandleReplyNetlink(t *testing.T) {
+	const (
+		length = 0x30
+		flags  = netlink.HeaderFlagsRequest
+	)
+	n, _ := TempNewNetlink()
 
+	/*
+		want := netlink.Message{
+			Header: netlink.Header{
+				Length: length,
+				Flags:  flags,
+				PID:    nltest.PID,
+			},
+			//	Data: mustMarshal(req),
+		}
+	*/
+	devID := make([]byte, 4)
+	nlenc.PutUint32(devID, 1)
+	status := make([]byte, 4)
+	nlenc.PutInt32(status, 0)
+	attrs := []netlink.Attribute{
+		{
+			Type: TCMU_ATTR_SUPP_KERN_CMD_REPLY,
+			Data: enabled(),
+		},
+		{
+			Type: TCMU_ATTR_CMD_STATUS,
+			Data: status,
+		},
+		{
+			Type: TCMU_ATTR_DEVICE_ID,
+			Data: devID,
+		},
+	}
+
+	data, err := netlink.MarshalAttributes(attrs)
+	if err != nil {
+		t.Fatalf("Failed to marshal data: %v", err)
+	}
+
+	want := []genetlink.Message{{
+		Header: genetlink.Header{
+			Command: TCMU_CMD_FOR_TEST_DONE,
+			Version: n.family.Version,
+		},
+		Data: data,
+	}}
+
+	received := false
+	go func() {
+		if msgs, _, err := n.c.Receive(); err != nil {
+			t.Fatalf("Failed to handleNetlink: %v", err)
+		} else {
+			received = true
+			if len(msgs) != 0 {
+
+			}
+			if diff := cmp.Diff(want, msgs); diff != "" {
+				t.Fatalf("unexpected replies (-want +got):\n%s", diff)
+			}
+			n.doneCh <- struct{}{}
+		}
+	}()
+
+	n.handleNetlinkReply(0, devID, TCMU_CMD_FOR_TEST_DONE)
+
+	time.Sleep(3000 * time.Millisecond)
+	if !received {
+		t.Fatalf("expected netlink received data, but not received")
+	}
 }
 
 func mustMarshal(m encoding.BinaryMarshaler) []byte {
@@ -106,7 +175,6 @@ func mustMarshal(m encoding.BinaryMarshaler) []byte {
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal binary: %v", err))
 	}
-
 	return b
 }
 
